@@ -23,14 +23,19 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     return rsi
 
 
-def build_features_for_one_stock(price_df: pd.DataFrame, meta_row: pd.Series) -> pd.DataFrame:
+def build_features_for_one_stock(
+    price_df: pd.DataFrame,
+    meta_row: pd.Series,
+    include_targets: bool = True
+) -> pd.DataFrame:
     if price_df is None or not isinstance(price_df, pd.DataFrame) or price_df.empty:
         return pd.DataFrame()
 
     required_input_cols = ["Date", "Close", "Volume"]
-    for col in required_input_cols:
-        if col not in price_df.columns:
-            return pd.DataFrame()
+    missing_input_cols = [col for col in required_input_cols if col not in price_df.columns]
+    if missing_input_cols:
+        print(f"[WARN] Missing input columns: {missing_input_cols}")
+        return pd.DataFrame()
 
     df = price_df.copy()
 
@@ -53,11 +58,10 @@ def build_features_for_one_stock(price_df: pd.DataFrame, meta_row: pd.Series) ->
     industry_score = INDUSTRY_SCORE_MAP.get(industry, 0.5)
     df["IndustryScore"] = industry_score
 
-    # 分類：明天是否上漲
-    df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
-
-    # 回歸：明天報酬率
-    df["Target_Return"] = (df["Close"].shift(-1) - df["Close"]) / df["Close"]
+    if include_targets:
+        # training only
+        df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
+        df["Target_Return"] = (df["Close"].shift(-1) - df["Close"]) / df["Close"]
 
     df["code"] = meta_row["code"]
     df["name"] = meta_row["name"]
@@ -83,9 +87,15 @@ def build_features_for_one_stock(price_df: pd.DataFrame, meta_row: pd.Series) ->
         "Price_Trend_5d",
         "Price_Trend_10d",
         "RSI_Trend",
-        "Target",
-        "Target_Return",
     ]
+
+    if include_targets:
+        required_cols.extend(["Target", "Target_Return"])
+
+    missing_required_cols = [col for col in required_cols if col not in df.columns]
+    if missing_required_cols:
+        print(f"[WARN] Missing required feature columns: {missing_required_cols}")
+        return pd.DataFrame()
 
     df = df.dropna(subset=required_cols).reset_index(drop=True)
     return df
@@ -105,7 +115,7 @@ def build_all_features():
 
         try:
             price_df = pd.read_csv(price_path)
-            feature_df = build_features_for_one_stock(price_df, row)
+            feature_df = build_features_for_one_stock(price_df, row, include_targets=True)
 
             if feature_df.empty:
                 print(f"[SKIP] Empty features for {row['code']}")
